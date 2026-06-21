@@ -1,4 +1,6 @@
-[project]
+
+[tool.vercel]
+entrypoint = "temp:app"
 name = "rag-project"
 version = "0.1.0"
 description = "Add your description here"
