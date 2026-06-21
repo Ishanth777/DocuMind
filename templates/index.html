@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DocuMind — RAG Search</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <div class="logo-icon">📄</div>
+                <div>
+                    <h1>DocuMind</h1>
+                    <p>Document Intelligence</p>
+                </div>
+            </div>
+
+            <div>
+                <div class="section-title">Upload Documents</div>
+                <div class="upload-zone" id="uploadZone">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    <p><strong>Click to upload</strong> or drag & drop</p>
+                    <p>PDF files supported</p>
+                    <input type="file" id="fileInput" accept=".pdf,.PDF">
+                </div>
+                <div class="upload-status" id="uploadStatus"></div>
+            </div>
+
+            <div>
+                <div class="section-title">Your Documents</div>
+                <ul class="file-list" id="fileList">
+                    <li class="empty-files">No documents uploaded yet</li>
+                </ul>
+            </div>
+        </aside>
+
+        <!-- Main -->
+        <main class="main">
+            <div class="main-header">
+                <h2>Ask your documents</h2>
+                <p>Upload PDFs, then search as many times as you like.</p>
+            </div>
+
+            <div class="chat-area" id="chatArea">
+                <div class="chat-empty" id="chatEmpty">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    <p>Ask a question about your uploaded documents</p>
+                </div>
+            </div>
+
+            <form class="search-bar" id="searchForm">
+                <input type="text" id="queryInput" placeholder="e.g. What are the key findings?" autocomplete="off">
+                <button type="submit" id="searchBtn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                    Search
+                </button>
+            </form>
+        </main>
+    </div>
+
+    <script>
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+        const uploadStatus = document.getElementById('uploadStatus');
+        const fileList = document.getElementById('fileList');
+        const chatArea = document.getElementById('chatArea');
+        const chatEmpty = document.getElementById('chatEmpty');
+        const searchForm = document.getElementById('searchForm');
+        const queryInput = document.getElementById('queryInput');
+        const searchBtn = document.getElementById('searchBtn');
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        async function loadFiles() {
+            try {
+                const res = await fetch('/api/files');
+                const data = await res.json();
+                renderFiles(data.files);
+            } catch {
+                fileList.innerHTML = '<li class="empty-files">Failed to load files</li>';
+            }
+        }
+
+        function renderFiles(files) {
+            if (!files.length) {
+                fileList.innerHTML = '<li class="empty-files">No documents uploaded yet</li>';
+                return;
+            }
+            fileList.innerHTML = files.map(f => `
+                <li class="file-item">
+                    <span class="file-icon">📄</span>
+                    <span class="file-name" title="${f.name}">${f.name}</span>
+                    <span class="file-size">${formatSize(f.size)}</span>
+                    <button class="file-delete" data-name="${f.name}" title="Delete">✕</button>
+                </li>
+            `).join('');
+        }
+
+        async function uploadFile(file) {
+            uploadStatus.className = 'upload-status';
+            uploadStatus.textContent = 'Uploading & indexing…';
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const res = await fetch('/api/upload', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Upload failed');
+
+                uploadStatus.className = 'upload-status success';
+                uploadStatus.textContent = data.message;
+                await loadFiles();
+            } catch (err) {
+                uploadStatus.className = 'upload-status error';
+                uploadStatus.textContent = err.message;
+            }
+        }
+
+        function addMessage(query, answer, isLoading) {
+            if (chatEmpty) chatEmpty.style.display = 'none';
+
+            const msg = document.createElement('div');
+            msg.className = 'chat-message';
+
+            const queryEl = document.createElement('div');
+            queryEl.className = 'message-query';
+            queryEl.textContent = query;
+            msg.appendChild(queryEl);
+
+            const answerEl = document.createElement('div');
+            answerEl.className = 'message-answer' + (isLoading ? ' loading' : '');
+            if (isLoading) {
+                answerEl.innerHTML = '<span class="spinner"></span> Searching documents…';
+            } else {
+                answerEl.textContent = answer;
+            }
+            msg.appendChild(answerEl);
+
+            chatArea.appendChild(msg);
+            chatArea.scrollTop = chatArea.scrollHeight;
+            return answerEl;
+        }
+
+        async function search(query) {
+            searchBtn.disabled = true;
+            const answerEl = addMessage(query, '', true);
+
+            try {
+                const res = await fetch('/api/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, top_k: 2 }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Search failed');
+
+                answerEl.className = 'message-answer';
+                answerEl.textContent = data.answer;
+            } catch (err) {
+                answerEl.className = 'message-answer';
+                answerEl.textContent = 'Error: ' + err.message;
+            }
+
+            searchBtn.disabled = false;
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        // Upload handlers
+        uploadZone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files[0]) uploadFile(fileInput.files[0]);
+            fileInput.value = '';
+        });
+
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+        uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]);
+        });
+
+        // Delete handler
+        fileList.addEventListener('click', async (e) => {
+            const btn = e.target.closest('.file-delete');
+            if (!btn) return;
+            const name = btn.dataset.name;
+            if (!confirm(`Delete "${name}"?`)) return;
+
+            try {
+                const res = await fetch(`/api/files/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Delete failed');
+                await loadFiles();
+            } catch (err) {
+                alert(err.message);
+            }
+        });
+
+        // Search handler
+        searchForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const query = queryInput.value.trim();
+            if (!query) return;
+            queryInput.value = '';
+            search(query);
+        });
+
+        loadFiles();
+    </script>
+</body>
+</html>
