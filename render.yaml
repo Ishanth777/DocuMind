@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: documind-rag
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn temp:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: QDRANT_COLLECTION_NAME
+        value: documind_docs
+      - key: LOGFIRE_TOKEN
+        sync: false
+      - key: CACHE_TTL_SECONDS
+        value: "3600"

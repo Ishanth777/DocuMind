@@ -5,9 +5,13 @@ build/
 dist/
 wheels/
 *.egg-info
+.DS_Store
 
-# Virtual environments
+# Virtual environments & env keys
 .venv
 .env
 
-
+# Vector DB local store
+qdrant_storage/
+faiss_store/
+.logfire/

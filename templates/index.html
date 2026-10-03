@@ -3,8 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DocuMind — RAG Search</title>
+    <title>DocuMind — Enterprise RAG Platform</title>
     <link rel="stylesheet" href="/static/style.css">
+    <!-- Marked.js & DOMPurify for Rich Markdown Rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
 </head>
 <body>
     <div class="app">
@@ -14,7 +17,31 @@
                 <div class="logo-icon">📄</div>
                 <div>
                     <h1>DocuMind</h1>
-                    <p>Document Intelligence</p>
+                    <p>Enterprise RAG Platform</p>
+                </div>
+            </div>
+
+            <!-- System Specs Card -->
+            <div class="system-card">
+                <div class="system-item">
+                    <span class="system-label">Vector Store</span>
+                    <span class="badge badge-qdrant">Qdrant Cloud</span>
+                </div>
+                <div class="system-item">
+                    <span class="system-label">LLM Gateway</span>
+                    <span class="badge badge-gateway">Groq + Fallback</span>
+                </div>
+                <div class="system-item">
+                    <span class="system-label">Cache Layer</span>
+                    <span class="badge badge-cache">In-Memory TTL</span>
+                </div>
+                <div class="system-item">
+                    <span class="system-label">Observability</span>
+                    <span class="badge badge-logfire">Logfire Active</span>
+                </div>
+                <div class="system-item">
+                    <span class="system-label">Guardrails</span>
+                    <span class="badge badge-guardrails">Active</span>
                 </div>
             </div>
 
@@ -45,7 +72,7 @@
         <main class="main">
             <div class="main-header">
                 <h2>Ask your documents</h2>
-                <p>Upload PDFs, then search as many times as you like.</p>
+                <p>Enterprise RAG with Qdrant vector search, in-memory caching, Logfire tracing & safety guardrails.</p>
             </div>
 
             <div class="chat-area" id="chatArea">
@@ -53,12 +80,12 @@
                     <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                     </svg>
-                    <p>Ask a question about your uploaded documents</p>
+                    <p>Upload a PDF document and ask any question</p>
                 </div>
             </div>
 
             <form class="search-bar" id="searchForm">
-                <input type="text" id="queryInput" placeholder="e.g. What are the key findings?" autocomplete="off">
+                <input type="text" id="queryInput" placeholder="e.g. What are the candidate's core technical skills and projects?" autocomplete="off">
                 <button type="submit" id="searchBtn">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -79,6 +106,14 @@
         const searchForm = document.getElementById('searchForm');
         const queryInput = document.getElementById('queryInput');
         const searchBtn = document.getElementById('searchBtn');
+
+        // Configure marked options
+        if (typeof marked !== 'undefined') {
+            marked.setOptions({
+                breaks: true,
+                gfm: true
+            });
+        }
 
         function formatSize(bytes) {
             if (bytes < 1024) return bytes + ' B';
@@ -113,7 +148,7 @@
 
         async function uploadFile(file) {
             uploadStatus.className = 'upload-status';
-            uploadStatus.textContent = 'Uploading & indexing…';
+            uploadStatus.textContent = 'Uploading & indexing into Qdrant…';
 
             const formData = new FormData();
             formData.append('file', file);
@@ -132,7 +167,7 @@
             }
         }
 
-        function addMessage(query, answer, isLoading) {
+        function addMessage(query) {
             if (chatEmpty) chatEmpty.style.display = 'none';
 
             const msg = document.createElement('div');
@@ -144,34 +179,97 @@
             msg.appendChild(queryEl);
 
             const answerEl = document.createElement('div');
-            answerEl.className = 'message-answer' + (isLoading ? ' loading' : '');
-            if (isLoading) {
-                answerEl.innerHTML = '<span class="spinner"></span> Searching documents…';
-            } else {
-                answerEl.textContent = answer;
-            }
+            answerEl.className = 'message-answer loading';
+            answerEl.innerHTML = '<span class="spinner"></span> Consulting Qdrant & synthesizing answer…';
             msg.appendChild(answerEl);
 
             chatArea.appendChild(msg);
             chatArea.scrollTop = chatArea.scrollHeight;
-            return answerEl;
+            return { msg, answerEl };
+        }
+
+        function renderAnswerDetails(container, data) {
+            container.className = 'message-answer';
+            container.innerHTML = '';
+
+            const bodyEl = document.createElement('div');
+            bodyEl.className = 'answer-body markdown-content';
+            
+            // Render structured Markdown safely
+            if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+                bodyEl.innerHTML = DOMPurify.sanitize(marked.parse(data.answer));
+            } else {
+                bodyEl.textContent = data.answer;
+            }
+            container.appendChild(bodyEl);
+
+            // Metadata footer
+            const metaEl = document.createElement('div');
+            metaEl.className = 'message-meta';
+
+            // Cache badge
+            if (data.cached) {
+                const cacheTag = document.createElement('span');
+                cacheTag.className = 'meta-tag meta-cache-hit';
+                cacheTag.textContent = '⚡ In-Memory Cache Hit';
+                metaEl.appendChild(cacheTag);
+            }
+
+            // Gateway badge
+            if (data.gateway && data.gateway.provider && data.gateway.provider !== 'none') {
+                const gw = document.createElement('span');
+                gw.className = 'meta-tag meta-provider';
+                const isFb = data.gateway.fallback_triggered;
+                gw.textContent = `Provider: ${data.gateway.provider}` + (isFb ? ' (Fallback)' : '');
+                metaEl.appendChild(gw);
+            }
+
+            // Latency badge
+            if (data.gateway && data.gateway.latency_ms !== undefined) {
+                const lat = document.createElement('span');
+                lat.className = 'meta-tag meta-latency';
+                lat.textContent = `${data.gateway.latency_ms}ms`;
+                metaEl.appendChild(lat);
+            }
+
+            // Guardrails badge
+            if (data.guardrails && data.guardrails.input) {
+                const gr = document.createElement('span');
+                if (data.guardrails.input.passed) {
+                    gr.className = 'meta-tag meta-guard-pass';
+                    gr.textContent = data.guardrails.input.action === 'mask' ? '🛡️ Guardrails: PII Redacted' : '🛡️ Guardrails: Passed';
+                } else {
+                    gr.className = 'meta-tag meta-guard-block';
+                    gr.textContent = '🛡️ Guardrails: Blocked';
+                }
+                metaEl.appendChild(gr);
+            }
+
+            container.appendChild(metaEl);
+
+            // Sources preview
+            if (data.sources && data.sources.length > 0) {
+                const sourcesEl = document.createElement('div');
+                sourcesEl.className = 'answer-sources';
+                sourcesEl.innerHTML = '<strong>Grounding Sources:</strong> ' + data.sources.map(s => `<span class="source-chip">${s.source.split('/').pop()} (p.${s.page})</span>`).join(' ');
+                container.appendChild(sourcesEl);
+            }
         }
 
         async function search(query) {
             searchBtn.disabled = true;
-            const answerEl = addMessage(query, '', true);
+            const { answerEl } = addMessage(query);
 
             try {
                 const res = await fetch('/api/search', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query, top_k: 2 }),
+                    body: JSON.stringify({ query, top_k: 3 }),
                 });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.detail || 'Search failed');
 
-                answerEl.className = 'message-answer';
-                answerEl.textContent = data.answer;
+                renderAnswerDetails(answerEl, data);
             } catch (err) {
                 answerEl.className = 'message-answer';
                 answerEl.textContent = 'Error: ' + err.message;
